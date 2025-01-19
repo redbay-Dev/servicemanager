@@ -399,19 +399,25 @@ function ServiceControl({ project, onStart, onStop }) {
       console.log('Start service result after conflicts:', result);
       if (result.error) {
         setOutput(prev => prev + `\nError starting service: ${result.error}\n`);
-        return;
+        setServiceDetails(prev => ({
+          ...prev,
+          status: 'error',
+          details: result.error
+        }));
+      } else {
+        console.log('Service started with PID:', result.processId);
+        setProcessId(result.processId);
+        setIsRunning(true);
+        setServiceDetails(prev => ({
+          ...prev,
+          status: 'starting',
+          pid: result.processId,
+          startTime: Date.now()
+        }));
+        if (onStart) {
+          onStart(result.processId);
+        }
       }
-
-      // Update state with new process
-      setProcessId(result.processId);
-      setIsRunning(true);
-      setServiceDetails(prev => ({
-        ...prev,
-        status: 'starting',
-        pid: result.processId,
-        startTime: Date.now()
-      }));
-
     } catch (error) {
       console.error('Error resolving port conflicts:', error);
       setOutput(prev => prev + `\nError resolving port conflicts: ${error.message}\n`);

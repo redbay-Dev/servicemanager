@@ -149,11 +149,12 @@ let processMonitor = setInterval(async () => {
       info.memory = memory;
       info.cpu = cpu;
       info.ports = ports;
+      info.status = info.status || 'running'; // Preserve existing status if set
 
       // Send status update
       mainWindow.webContents.send('process-status', {
         processId: pid,
-        status: 'running',
+        status: info.status,
         memory,
         cpu,
         ports,
@@ -163,8 +164,11 @@ let processMonitor = setInterval(async () => {
 
     } catch (error) {
       console.error(`Error monitoring process ${pid}:`, error);
-      sendProcessStatus(pid, 'error');
-      processes.delete(pid);
+      // Only update status to error if it's a critical error
+      if (!processes.has(pid) || error.message.includes('not found')) {
+        sendProcessStatus(pid, 'error');
+        processes.delete(pid);
+      }
     }
   }
 }, 1000);
@@ -462,6 +466,7 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
       command,
       workingDirectory,
       startTime: Date.now(),
+      status: 'starting', // Add explicit status tracking
       memory: 0,
       cpu: 0,
       ports: []
@@ -478,6 +483,13 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
         data: output,
         timestamp: Date.now()
       });
+      
+      // Update status to running after we see output
+      const processInfo = processes.get(processId);
+      if (processInfo && processInfo.status === 'starting') {
+        processInfo.status = 'running';
+        sendProcessStatus(processId, 'running');
+      }
     });
 
     childProcess.stderr.on('data', (data) => {
@@ -496,18 +508,20 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
         data: `Process error: ${error.message}\n`,
         timestamp: Date.now()
       });
+      const processInfo = processes.get(processId);
+      if (processInfo) {
+        processInfo.status = 'error';
+      }
       sendProcessStatus(processId, 'error');
-      processes.delete(processId);
     });
 
     childProcess.on('exit', (code, signal) => {
-      console.log('Process exited:', { processId, code, signal });
-      event.sender.send('service-output', {
-        type: 'status',
-        data: `Process exited with code ${code}${signal ? ` (signal: ${signal})` : ''}\n`,
-        timestamp: Date.now()
-      });
-      sendProcessStatus(processId, 'stopped');
+      console.log(`Process ${processId} exited with code ${code} and signal ${signal}`);
+      const processInfo = processes.get(processId);
+      if (processInfo) {
+        processInfo.status = code === 0 ? 'stopped' : 'error';
+        sendProcessStatus(processId, processInfo.status);
+      }
       processes.delete(processId);
     });
 
