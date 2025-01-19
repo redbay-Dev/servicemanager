@@ -45,46 +45,31 @@ function ServiceControl({ project, onStart, onStop }) {
         return;
       }
 
-      console.log('Current service details:', serviceDetails);
-      console.log('Updating service details with:', {
-        status: data.status,
-        pid: data.processId,
-        memory: data.memory,
-        cpu: data.cpu,
-        ports: data.ports,
-        startTime: data.startTime
-      });
-
       setServiceDetails(prev => {
-        const updated = {
+        // Maintain existing ports unless process is stopped
+        const updatedPorts = data.status === 'stopped' ? [] : (prev.ports || []);
+        
+        return {
           ...prev,
           status: data.status,
           pid: data.processId,
           memory: data.memory,
           cpu: data.cpu,
-          ports: data.ports,
+          ports: updatedPorts,
           startTime: data.startTime || prev.startTime
         };
-        console.log('Updated service details:', updated);
-        return updated;
       });
 
       if (data.status === 'stopped' || data.status === 'error') {
-        console.log('Setting process as stopped/error');
         setIsRunning(false);
         setProcessId(null);
       } else if (data.status === 'running' || data.status === 'starting') {
-        console.log('Setting process as running');
         setIsRunning(true);
       }
     };
 
-    console.log('Setting up process status listener');
-    const cleanup = window.electron.on('process-status', handleProcessStatus);
-    return () => {
-      console.log('Cleaning up process status listener');
-      cleanup();
-    };
+    window.electron.on('process-status', handleProcessStatus);
+    return () => window.electron.off('process-status', handleProcessStatus);
   }, [processId]);
 
   // Handle service output
@@ -185,17 +170,52 @@ function ServiceControl({ project, onStart, onStop }) {
     }));
   }, [output]);
 
-  const loadActivePorts = async () => {
-    try {
-      const ports = await window.electron.invoke('get-active-ports');
-      setServiceDetails(prev => ({
-        ...prev,
-        activePorts: ports
-      }));
-    } catch (error) {
-      setOutput(prev => prev + `\nError loading active ports: ${error.message}\n`);
+  // Poll for active ports
+  useEffect(() => {
+    if (isRunning && processId) {
+      console.log('Starting port polling for PID:', processId);
+      const pollPorts = async () => {
+        try {
+          console.log('Polling ports for PID:', processId);
+          const ports = await window.electron.invoke('get-active-ports', { pid: processId });
+          console.log('Got ports from main process:', ports);
+          
+          setServiceDetails(prev => {
+            // Always update if we have ports
+            if (Array.isArray(ports)) {
+              const newPorts = ports.length > 0 ? ports : prev.ports || [];
+              console.log('Setting ports:', newPorts);
+              return {
+                ...prev,
+                ports: newPorts
+              };
+            }
+            return prev;
+          });
+        } catch (error) {
+          console.error('Error polling ports:', error);
+        }
+      };
+
+      // Initial load
+      pollPorts();
+
+      // Set up polling interval - poll more frequently at first
+      const fastInterval = setInterval(pollPorts, 1000);
+      
+      // After 10 seconds, switch to slower polling
+      const slowdownTimer = setTimeout(() => {
+        clearInterval(fastInterval);
+        setInterval(pollPorts, 5000);
+      }, 10000);
+
+      return () => {
+        console.log('Cleaning up port polling');
+        clearInterval(fastInterval);
+        clearTimeout(slowdownTimer);
+      };
     }
-  };
+  }, [isRunning, processId]);
 
   const getStatusDetails = (status, details) => {
     switch (status) {

@@ -106,7 +106,7 @@ async function monitorProcess(processId) {
 
     const parts = tasklistOutput.split(',').map(p => p.replace(/"/g, '').trim());
     if (parts.length < 5) {
-      throw new Error('Invalid tasklist output format');
+      throw new Error('Process not found');
     }
 
     // Parse memory
@@ -131,38 +131,42 @@ async function monitorProcess(processId) {
       console.error('Error getting CPU:', error);
     }
 
-    // Get ports using powershell netstat
+    // Get ports using netstat
+    const { stdout: netstatOutput } = await execAsync('netstat -ano');
     const ports = [];
-    try {
-      const netstatCmd = `powershell "Get-NetTCPConnection | Where-Object { $_.OwningProcess -eq ${processId} } | Select-Object LocalPort"`;
-      const { stdout: netstatOutput } = await execAsync(netstatCmd);
-      const lines = netstatOutput.trim().split('\n');
-      
-      // Skip header line
-      for (let i = 2; i < lines.length; i++) {
-        const port = parseInt(lines[i].trim());
-        if (!isNaN(port) && !ports.includes(port)) {
-          ports.push(port);
-        }
-      }
-    } catch (error) {
-      console.error('Error getting ports:', error);
-      // Fallback to simpler netstat command if powershell fails
-      try {
-        const { stdout: netstatOutput } = await execAsync(`netstat -ano | findstr ${processId}`);
-        const lines = netstatOutput.split('\n');
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length >= 2 && parts[1].includes(':')) {
-            const port = parseInt(parts[1].split(':')[1]);
+    
+    // First check the main process
+    netstatOutput.split('\n').forEach(line => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 5 && parts[3] === 'LISTENING') {
+        const processPid = parseInt(parts[4]);
+        if (processPid === processId) {
+          const portMatch = parts[1].match(/:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1]);
             if (!isNaN(port) && !ports.includes(port)) {
               ports.push(port);
             }
           }
         }
-      } catch (fallbackError) {
-        console.error('Error with fallback port detection:', fallbackError);
       }
+    });
+
+    // If no ports found, look for ports in the expected range (3000-3999)
+    if (ports.length === 0) {
+      netstatOutput.split('\n').forEach(line => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 5 && parts[3] === 'LISTENING') {
+          const portMatch = parts[1].match(/:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1]);
+            if (!isNaN(port) && port >= 3000 && port <= 3999 && !ports.includes(port)) {
+              console.log(`Found potential project port: ${port}`);
+              ports.push(port);
+            }
+          }
+        }
+      });
     }
 
     // Send status update
@@ -171,18 +175,25 @@ async function monitorProcess(processId) {
       status: 'running',
       memory: parseFloat(memoryMB),
       cpu,
-      ports,
+      ports: ports.sort((a, b) => a - b),
       startTime: processes.get(processId)?.startTime || Date.now(),
       timestamp: Date.now()
     };
 
+    console.log('Sending status update:', status);
     mainWindow.webContents.send('process-status', status);
 
   } catch (error) {
     console.error('Error in monitorProcess:', error);
-    if (error.message.includes('not found') || error.message.includes('Cannot find a process')) {
+    if (error.message.includes('Process not found')) {
       processes.delete(processId);
-      mainWindow.webContents.send('service-stopped', { processId });
+      mainWindow.webContents.send('process-status', { 
+        processId,
+        status: 'stopped',
+        ports: [],
+        cpu: 0,
+        memory: 0
+      });
     }
   }
 }
@@ -256,8 +267,16 @@ ipcMain.handle('update-project', async (event, project) => {
 });
 
 // Port Management Handlers
-ipcMain.handle('get-active-ports', async () => {
-  return await getActivePorts();
+ipcMain.handle('get-active-ports', async (event, { pid }) => {
+  console.log('get-active-ports called with pid:', pid);
+  try {
+    const ports = await getActivePorts(pid);
+    console.log('Found ports:', ports);
+    return ports;
+  } catch (error) {
+    console.error('Error in get-active-ports:', error);
+    return [];
+  }
 });
 
 ipcMain.handle('get-port-process-info', async (event, { ports }) => {

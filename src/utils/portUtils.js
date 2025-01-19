@@ -209,11 +209,6 @@ async function killProcess(port, pid) {
   }
 }
 
-const CRITICAL_PROCESSES = [
-  'system', 'ntoskrnl.exe', 'wininit.exe', 'csrss.exe', 'smss.exe',
-  'services.exe', 'lsass.exe', 'svchost.exe', 'explorer.exe'
-];
-
 async function getPortProcess(port) {
   try {
     const { stdout } = await execPromise(`netstat -ano | findstr :${port}`);
@@ -270,6 +265,86 @@ async function checkPortConflicts(command, workingDirectory) {
   return conflicts;
 }
 
+async function getActivePorts(pid) {
+  console.log('getActivePorts called with PID:', pid);
+  if (!pid) {
+    console.log('No PID provided, returning empty array');
+    return [];
+  }
+  
+  try {
+    // First get all child processes using tasklist
+    const { stdout: tasklistOutput } = await execPromise(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
+    console.log('Tasklist output:', tasklistOutput);
+    
+    // Parse the CSV output
+    const taskInfo = tasklistOutput.split('\n')[0];
+    if (!taskInfo) {
+      console.log('No process found with PID:', pid);
+      return [];
+    }
+
+    // Now get all TCP connections
+    const { stdout: netstatOutput } = await execPromise('netstat -ano');
+    console.log('Got netstat output');
+    
+    const portsMap = new Map();
+    let foundPid = false;
+
+    netstatOutput.split('\n').forEach(line => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 5) {
+        const localAddress = parts[1];
+        const state = parts[3];
+        const processPid = parseInt(parts[4]);
+        
+        if (!isNaN(processPid) && processPid === parseInt(pid) && state === 'LISTENING') {
+          foundPid = true;
+          const portMatch = localAddress.match(/:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1]);
+            if (!isNaN(port)) {
+              console.log(`Found port ${port} for PID ${processPid}`);
+              portsMap.set(port, processPid);
+            }
+          }
+        }
+      }
+    });
+
+    // Also check for any ports in the 3000-3999 range that started within a few seconds of our process
+    if (portsMap.size === 0) {
+      netstatOutput.split('\n').forEach(line => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 5 && parts[3] === 'LISTENING') {
+          const localAddress = parts[1];
+          const portMatch = localAddress.match(/:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1]);
+            if (!isNaN(port) && port >= 3000 && port <= 3999) {
+              console.log(`Found potential port ${port}`);
+              portsMap.set(port, parseInt(parts[4]));
+            }
+          }
+        }
+      });
+    }
+
+    console.log(`Process ${pid} found in netstat: ${foundPid}`);
+    const ports = Array.from(portsMap.keys()).sort((a, b) => a - b);
+    console.log('Final ports found:', ports);
+    return ports;
+  } catch (error) {
+    console.error('Error getting active ports:', error);
+    return [];
+  }
+}
+
+const CRITICAL_PROCESSES = [
+  'system', 'ntoskrnl.exe', 'wininit.exe', 'csrss.exe', 'smss.exe',
+  'services.exe', 'lsass.exe', 'svchost.exe', 'explorer.exe'
+];
+
 module.exports = {
   killPort,
   getPortProcessInfo,
@@ -277,5 +352,6 @@ module.exports = {
   killProcess,
   getPortProcess,
   isPortInUse,
-  checkPortConflicts
+  checkPortConflicts,
+  getActivePorts
 };
