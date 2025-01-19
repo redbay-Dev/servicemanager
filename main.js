@@ -109,50 +109,59 @@ async function monitorProcess(processId) {
       throw new Error('Invalid tasklist output format');
     }
 
-    // Parse memory - combine the split parts if necessary
+    // Parse memory
     const memoryString = parts.slice(4).join(',');
     const memoryKB = parseInt(memoryString.replace(/[^0-9]/g, ''));
     const memoryMB = (memoryKB / 1024).toFixed(2);
 
-    // Get process name for CPU monitoring
-    const processName = parts[0];
-    
-    // Get CPU using typeperf
-    const typeperfCmd = `typeperf "\\Process(${processName})\\% Processor Time" -sc 1`;
+    // Get CPU using powershell
     let cpu = 0;
-    
     try {
-      const { stdout: cpuOutput } = await execAsync(typeperfCmd);
-      const lines = cpuOutput.trim().split('\n');
-      if (lines.length >= 2) {
-        const values = lines[1].split(',');
-        if (values.length >= 2) {
-          const rawValue = values[1].replace(/"/g, '').trim();
-          cpu = parseFloat(rawValue);
-          cpu = Math.min(100, Math.max(0, cpu));
-        }
+      const psCommand = `powershell "Get-Process -Id ${processId} | Select-Object -ExpandProperty CPU"`;
+      const { stdout: cpuOutput } = await execAsync(psCommand);
+      const cpuValue = parseFloat(cpuOutput);
+      if (!isNaN(cpuValue)) {
+        // Convert CPU time to percentage based on process uptime
+        const uptimeMs = Date.now() - (processes.get(processId)?.startTime || Date.now());
+        const uptimeSec = uptimeMs / 1000;
+        cpu = (cpuValue / uptimeSec) * 100;
+        cpu = Math.min(100, Math.max(0, cpu));
       }
     } catch (error) {
       console.error('Error getting CPU:', error);
     }
 
-    // Get ports using simpler netstat command
-    const { stdout: netstatOutput } = await execAsync('netstat -ano -p TCP');
+    // Get ports using powershell netstat
     const ports = [];
-    const netstatLines = netstatOutput.split('\n');
-    
-    for (const line of netstatLines) {
-      const parts = line.trim().split(/\s+/);
-      // Check if this line has enough parts and matches our PID
-      if (parts.length >= 5 && parts[4] === processId.toString()) {
-        // Parse the local address part (e.g. "0.0.0.0:3000")
-        const addrParts = parts[1].split(':');
-        if (addrParts.length === 2) {
-          const port = parseInt(addrParts[1]);
-          if (!isNaN(port) && !ports.includes(port)) {
-            ports.push(port);
+    try {
+      const netstatCmd = `powershell "Get-NetTCPConnection | Where-Object { $_.OwningProcess -eq ${processId} } | Select-Object LocalPort"`;
+      const { stdout: netstatOutput } = await execAsync(netstatCmd);
+      const lines = netstatOutput.trim().split('\n');
+      
+      // Skip header line
+      for (let i = 2; i < lines.length; i++) {
+        const port = parseInt(lines[i].trim());
+        if (!isNaN(port) && !ports.includes(port)) {
+          ports.push(port);
+        }
+      }
+    } catch (error) {
+      console.error('Error getting ports:', error);
+      // Fallback to simpler netstat command if powershell fails
+      try {
+        const { stdout: netstatOutput } = await execAsync(`netstat -ano | findstr ${processId}`);
+        const lines = netstatOutput.split('\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 2 && parts[1].includes(':')) {
+            const port = parseInt(parts[1].split(':')[1]);
+            if (!isNaN(port) && !ports.includes(port)) {
+              ports.push(port);
+            }
           }
         }
+      } catch (fallbackError) {
+        console.error('Error with fallback port detection:', fallbackError);
       }
     }
 
