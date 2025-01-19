@@ -1,6 +1,6 @@
 # Service Manager
 
- Redbay Digital. This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
+© Redbay Digital. This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
 
 A modern desktop application for managing multiple development services and projects. Built with Electron and React, it provides an intuitive interface for starting, stopping, and monitoring local development services.
 
