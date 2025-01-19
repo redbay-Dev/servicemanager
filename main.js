@@ -94,91 +94,114 @@ function sendProcessStatus(processId, status) {
   });
 }
 
-// Monitor processes
-let processMonitor = setInterval(async () => {
-  for (const [pid, info] of processes.entries()) {
+// Monitor process resources
+async function monitorProcess(processId) {
+  try {
+    console.log(`Monitoring process ${processId}...`);
+    
+    // Get process info using tasklist
+    const { stdout: tasklistOutput } = await execAsync(
+      `tasklist /FI "PID eq ${processId}" /FO CSV /NH`
+    );
+
+    const parts = tasklistOutput.split(',').map(p => p.replace(/"/g, '').trim());
+    if (parts.length < 5) {
+      throw new Error('Invalid tasklist output format');
+    }
+
+    // Parse memory - combine the split parts if necessary
+    const memoryString = parts.slice(4).join(',');
+    const memoryKB = parseInt(memoryString.replace(/[^0-9]/g, ''));
+    const memoryMB = (memoryKB / 1024).toFixed(2);
+
+    // Get process name for CPU monitoring
+    const processName = parts[0];
+    
+    // Get CPU using typeperf
+    const typeperfCmd = `typeperf "\\Process(${processName})\\% Processor Time" -sc 1`;
+    let cpu = 0;
+    
     try {
-      // Check if process exists
-      const { stdout } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
-      const isRunning = stdout.includes(pid.toString());
-
-      if (!isRunning) {
-        console.log(`Process ${pid} no longer exists, cleaning up...`);
-        sendProcessStatus(pid, 'stopped');
-        processes.delete(pid);
-        continue;
+      const { stdout: cpuOutput } = await execAsync(typeperfCmd);
+      const lines = cpuOutput.trim().split('\n');
+      if (lines.length >= 2) {
+        const values = lines[1].split(',');
+        if (values.length >= 2) {
+          const rawValue = values[1].replace(/"/g, '').trim();
+          cpu = parseFloat(rawValue);
+          cpu = Math.min(100, Math.max(0, cpu));
+        }
       }
+    } catch (error) {
+      console.error('Error getting CPU:', error);
+    }
 
-      // Get process stats
-      const { stdout: processStats } = await execAsync(
-        `wmic process where ProcessId=${pid} get WorkingSetSize,PercentProcessorTime /format:csv`
-      );
-      
-      const lines = processStats.split('\n').filter(line => line.trim());
-      let memory = 0;
-      let cpu = 0;
-
-      if (lines.length > 1) {
-        const [_, values] = lines;
-        const [workingSet, cpuTime] = values.split(',').map(v => parseInt(v));
-        memory = Math.round(workingSet / (1024 * 1024) * 100) / 100; // Convert to MB
-        cpu = cpuTime || 0;
-      }
-
-      // Get ports
-      const ports = [];
-      try {
-        const { stdout: netstat } = await execAsync(`netstat -ano | findstr ${pid}`);
-        const portLines = netstat.split('\n').filter(line => line.trim());
-        
-        for (const line of portLines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length >= 4) {
-            const localAddress = parts[1];
-            const port = parseInt(localAddress.split(':').pop());
-            if (!isNaN(port) && !ports.includes(port)) {
-              ports.push(port);
-            }
+    // Get ports using simpler netstat command
+    const { stdout: netstatOutput } = await execAsync('netstat -ano -p TCP');
+    const ports = [];
+    const netstatLines = netstatOutput.split('\n');
+    
+    for (const line of netstatLines) {
+      const parts = line.trim().split(/\s+/);
+      // Check if this line has enough parts and matches our PID
+      if (parts.length >= 5 && parts[4] === processId.toString()) {
+        // Parse the local address part (e.g. "0.0.0.0:3000")
+        const addrParts = parts[1].split(':');
+        if (addrParts.length === 2) {
+          const port = parseInt(addrParts[1]);
+          if (!isNaN(port) && !ports.includes(port)) {
+            ports.push(port);
           }
         }
-      } catch (error) {
-        // Ignore netstat errors
-      }
-
-      // Update process info
-      info.memory = memory;
-      info.cpu = cpu;
-      info.ports = ports;
-      info.status = info.status || 'running'; // Preserve existing status if set
-
-      // Send status update
-      mainWindow.webContents.send('process-status', {
-        processId: pid,
-        status: info.status,
-        memory,
-        cpu,
-        ports,
-        startTime: info.startTime,
-        timestamp: Date.now()
-      });
-
-    } catch (error) {
-      console.error(`Error monitoring process ${pid}:`, error);
-      // Only update status to error if it's a critical error
-      if (!processes.has(pid) || error.message.includes('not found')) {
-        sendProcessStatus(pid, 'error');
-        processes.delete(pid);
       }
     }
-  }
-}, 1000);
 
-// Clean up monitor on app quit
+    // Send status update
+    const status = {
+      processId,
+      status: 'running',
+      memory: parseFloat(memoryMB),
+      cpu,
+      ports,
+      startTime: processes.get(processId)?.startTime || Date.now(),
+      timestamp: Date.now()
+    };
+
+    mainWindow.webContents.send('process-status', status);
+
+  } catch (error) {
+    console.error('Error in monitorProcess:', error);
+    if (error.message.includes('not found') || error.message.includes('Cannot find a process')) {
+      processes.delete(processId);
+      mainWindow.webContents.send('service-stopped', { processId });
+    }
+  }
+}
+
+// Start monitoring loop
+let monitoringInterval;
+function startMonitoring() {
+  if (monitoringInterval) {
+    clearInterval(monitoringInterval);
+  }
+  
+  monitoringInterval = setInterval(() => {
+    for (const [processId] of processes) {
+      monitorProcess(processId).catch(error => {
+        console.error('Error in monitoring loop:', error);
+      });
+    }
+  }, 1000);
+}
+
+// Clean up on app quit
 app.on('before-quit', () => {
-  if (processMonitor) {
-    clearInterval(processMonitor);
+  if (monitoringInterval) {
+    clearInterval(monitoringInterval);
   }
 });
+
+startMonitoring();
 
 // Database Handlers
 ipcMain.handle('get-projects', async () => {
@@ -257,7 +280,7 @@ ipcMain.handle('get-port-process-info', async (event, { ports }) => {
                   const { stdout: processInfo } = await execAsync(
                     `tasklist /FI "PID eq ${pid}" /FO CSV /NH`
                   );
-                  const [name] = processInfo.split(',').map(p => p.replace(/"/g, ''));
+                  const [name] = processInfo.split(',').map(p => p.replace(/"/g, '').trim());
                   processes.push({
                     pid: parseInt(pid),
                     command: name
@@ -326,8 +349,7 @@ ipcMain.handle('kill-ports', async (event, { ports }) => {
             try {
               // Get process name before killing
               const { stdout: processInfo } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
-              const processName = processInfo.split(',')[0].replace(/"/g, '');
-
+              const processName = processInfo.split(',')[0].replace(/"/g, '').trim();
               // Skip system processes
               const systemProcesses = ['System', 'Registry', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe'];
               if (systemProcesses.includes(processName)) {
@@ -393,47 +415,49 @@ ipcMain.handle('kill-ports', async (event, { ports }) => {
   }
 });
 
-ipcMain.handle('kill-port-processes', async (event, { pid, port }) => {
+// Get port conflicts
+async function getPortConflicts() {
   try {
-    console.log('Killing process on port:', { pid, port });
+    const { stdout } = await execAsync('netstat -ano');
+    const lines = stdout.split('\n');
+    const commonPorts = [3000, 3001, 3002, 3003, 3004, 3005, 8000, 8080];
+    const conflicts = [];
+    const seen = new Set();
+
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 5) {
+        const localAddress = parts[1];
+        if (localAddress.includes('[::]') || localAddress.includes('127.0.0.1') || localAddress.includes('0.0.0.0')) {
+          const port = parseInt(localAddress.split(':').pop());
+          const pid = parseInt(parts[4]);
+          
+          if (!isNaN(port) && !isNaN(pid) && commonPorts.includes(port)) {
+            const key = `${port}-${pid}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              try {
+                const { stdout: processInfo } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
+                const name = processInfo.split(',')[0].replace(/"/g, '').trim();
+                conflicts.push({ pid, port, name });
+              } catch (error) {
+                console.error(`Error getting process info for PID ${pid}:`, error);
+              }
+            }
+          }
+        }
+      }
+    }
     
-    if (!pid || pid === 0) {
-      throw new Error('Invalid PID');
-    }
-
-    // First try graceful termination
-    try {
-      console.log('Attempting graceful termination of PID:', pid);
-      await execAsync(`taskkill /PID ${pid}`);
-      console.log(`Successfully killed process ${pid}`);
-    } catch (error) {
-      console.log('Graceful termination failed:', error);
-      console.log('Trying force kill...');
-      // If graceful fails, try force kill
-      await execAsync(`taskkill /F /PID ${pid}`);
-      console.log(`Force killed process ${pid}`);
-    }
-
-    // Wait a moment for the process to fully terminate
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Verify the port is now free
-    console.log('Verifying port is free...');
-    const isStillInUse = await isPortInUse(port);
-    if (isStillInUse) {
-      const error = new Error(`Port ${port} is still in use after killing process ${pid}`);
-      console.error(error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
+    return conflicts;
   } catch (error) {
-    console.error('Error killing process:', error);
-    return { success: false, error: error.message };
+    console.error('Error checking port conflicts:', error);
+    return [];
   }
-});
+}
 
-ipcMain.handle('start-service', async (event, { command, workingDirectory }) => {
+// Start service function
+async function startService(event, { command, workingDirectory }) {
   try {
     if (!command) {
       throw new Error('No command specified');
@@ -441,39 +465,31 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
 
     // Check for port conflicts
     console.log('Checking for port conflicts...');
-    const conflicts = await checkPortConflicts(command, workingDirectory);
+    const conflicts = await getPortConflicts();
     console.log('Port conflict check result:', conflicts);
     
     if (conflicts && conflicts.length > 0) {
       console.log('Port conflicts found:', conflicts);
-      event.sender.send('port-conflict', conflicts);
       return { error: 'PORT_CONFLICT', conflicts };
     }
 
     console.log('Starting process...');
-    const childProcess = spawn(command, [], {
+    const childProcess = spawn(command, {
       shell: true,
       cwd: workingDirectory,
-      env: { ...process.env, FORCE_COLOR: true }
+      env: {
+        ...process.env,
+        FORCE_COLOR: true
+      }
     });
-
-    const processId = childProcess.pid;
-    console.log('Started process with PID:', processId);
 
     // Store process info
-    processes.set(processId, {
+    const processInfo = {
       process: childProcess,
-      command,
-      workingDirectory,
       startTime: Date.now(),
-      status: 'starting', // Add explicit status tracking
-      memory: 0,
-      cpu: 0,
-      ports: []
-    });
-
-    // Send initial status
-    sendProcessStatus(processId, 'starting');
+      status: 'running'
+    };
+    processes.set(childProcess.pid, processInfo);
 
     // Handle process output
     childProcess.stdout.on('data', (data) => {
@@ -483,13 +499,6 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
         data: output,
         timestamp: Date.now()
       });
-      
-      // Update status to running after we see output
-      const processInfo = processes.get(processId);
-      if (processInfo && processInfo.status === 'starting') {
-        processInfo.status = 'running';
-        sendProcessStatus(processId, 'running');
-      }
     });
 
     childProcess.stderr.on('data', (data) => {
@@ -508,27 +517,63 @@ ipcMain.handle('start-service', async (event, { command, workingDirectory }) => 
         data: `Process error: ${error.message}\n`,
         timestamp: Date.now()
       });
-      const processInfo = processes.get(processId);
-      if (processInfo) {
-        processInfo.status = 'error';
-      }
-      sendProcessStatus(processId, 'error');
     });
 
     childProcess.on('exit', (code, signal) => {
-      console.log(`Process ${processId} exited with code ${code} and signal ${signal}`);
-      const processInfo = processes.get(processId);
-      if (processInfo) {
-        processInfo.status = code === 0 ? 'stopped' : 'error';
-        sendProcessStatus(processId, processInfo.status);
-      }
-      processes.delete(processId);
+      console.log(`Process ${childProcess.pid} exited with code ${code} and signal ${signal}`);
+      processes.delete(childProcess.pid);
+      event.sender.send('service-stopped', { processId: childProcess.pid });
     });
 
-    return { processId };
+    return {
+      processId: childProcess.pid
+    };
+
   } catch (error) {
     console.error('Error starting service:', error);
     return { error: error.message };
+  }
+}
+
+// IPC Handlers
+ipcMain.handle('start-service', startService);
+
+ipcMain.handle('kill-port-processes', async (event, { conflicts }) => {
+  console.log('Killing port processes:', conflicts);
+  try {
+    // Get unique PIDs since one process might use multiple ports
+    const uniquePids = [...new Set(conflicts.map(c => c.pid))];
+    console.log('Unique PIDs to kill:', uniquePids);
+
+    for (const pid of uniquePids) {
+      try {
+        await execAsync(`taskkill /F /PID ${pid}`);
+        console.log(`Killed process ${pid}`);
+      } catch (error) {
+        // If process is already gone, that's fine
+        if (error.message.includes('not found')) {
+          console.log(`Process ${pid} already terminated`);
+          continue;
+        }
+        console.error(`Failed to kill process ${pid}:`, error);
+        throw error;
+      }
+    }
+
+    // Wait a bit for processes to fully terminate
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Verify ports are free
+    const remainingConflicts = await getPortConflicts();
+    if (remainingConflicts.length > 0) {
+      console.log('Some ports still in use:', remainingConflicts);
+      return { success: false, error: 'Some ports are still in use' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error killing processes:', error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -582,32 +627,34 @@ async function getProcessOnPort(port) {
   }
 }
 
-async function checkPortConflicts(command, workingDirectory) {
+async function checkPortConflicts(ports) {
+  if (!ports || !ports.length) return [];
+  
   try {
-    // First try to extract ports from the command
-    const portPattern = /-p\s*(\d+)|port[=:]\s*(\d+)|:(\d{4,5})/gi;
-    const matches = command.matchAll(portPattern);
-    const ports = new Set();
-    
-    for (const match of matches) {
-      const port = parseInt(match[1] || match[2] || match[3]);
-      if (port > 0) ports.add(port);
-    }
-
-    // Also check common development ports
-    const commonPorts = [3000, 3001, 3002, 3003, 3004, 3005, 8000, 8080];
-    for (const port of commonPorts) {
-      ports.add(port);
-    }
-
+    const { stdout } = await execAsync('netstat -ano');
+    const lines = stdout.split('\n');
     const conflicts = [];
-    for (const port of ports) {
-      const processInfo = await getProcessOnPort(port);
-      if (processInfo) {
-        conflicts.push(processInfo);
+    
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 5) {
+        const localAddress = parts[1];
+        const pid = parseInt(parts[4]);
+        if (!isNaN(pid)) {
+          const port = parseInt(localAddress.split(':').pop());
+          if (!isNaN(port) && ports.includes(port)) {
+            try {
+              const { stdout: processName } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
+              const name = processName.split(',')[0].replace(/"/g, '').trim();
+              conflicts.push({ pid, port, name });
+            } catch (error) {
+              console.error(`Error getting process name for PID ${pid}:`, error);
+            }
+          }
+        }
       }
     }
-
+    
     return conflicts;
   } catch (error) {
     console.error('Error checking port conflicts:', error);
@@ -666,12 +713,9 @@ ipcMain.handle('get-process-details', async (event, { pid }) => {
       return { error: 'Process not found' };
     }
 
-    // Get process stats using wmic
-    const { stdout: processStats } = await execAsync(
-      `wmic process where ProcessId=${pid} get WorkingSetSize,PercentProcessorTime /format:csv`
-    );
-    
-    const lines = processStats.split('\n').filter(line => line.trim());
+    // Get process stats using tasklist
+    const { stdout: processStats } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
+    const lines = processStats.trim().split('\n');
     let memory = 0;
     let cpu = 0;
 
@@ -725,13 +769,13 @@ ipcMain.handle('check-port-conflicts', async (event, { ports }) => {
     
     for (const port of ports) {
       try {
-        const { stdout: netstat } = await execAsync(
+        const { stdout } = await execAsync(
           process.platform === 'win32'
-            ? `netstat -ano | findstr :${port}`
+            ? `netstat -ano | findstr ":${port}"`
             : `lsof -i :${port} -t`
         );
 
-        if (netstat.trim()) {
+        if (stdout.trim()) {
           const processes = await getPortProcessInfo(port);
           if (processes.length > 0) {
             conflicts.push({
@@ -767,15 +811,22 @@ async function getProcessName(pid) {
 async function checkProcessRunning(pid) {
   try {
     if (process.platform === 'win32') {
-      // Use wmic on Windows
-      const { stdout } = await execAsync(`wmic process where ProcessId=${pid} get WorkingSetSize,PercentProcessorTime /value`);
+      // Use tasklist on Windows
+      const { stdout } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`);
       const lines = stdout.trim().split('\n');
-      const memory = parseInt(lines[0].split('=')[1]) / (1024 * 1024); // Convert to MB
-      const cpu = parseFloat(lines[1].split('=')[1]) || 0;
-      
+      let memory = 0;
+      let cpu = 0;
+
+      if (lines.length > 1) {
+        const [_, values] = lines;
+        const [workingSet, cpuTime] = values.split(',').map(v => parseInt(v));
+        memory = Math.round(workingSet / (1024 * 1024) * 100) / 100; // Convert to MB
+        cpu = cpuTime || 0;
+      }
+
       return {
-        memory: Math.round(memory * 100) / 100,
-        cpu: Math.round(cpu * 100) / 100
+        memory,
+        cpu
       };
     } else {
       // Use ps on Unix-like systems

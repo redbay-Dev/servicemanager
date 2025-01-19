@@ -35,29 +35,56 @@ function ServiceControl({ project, onStart, onStop }) {
   // Handle process status updates
   useEffect(() => {
     const handleProcessStatus = (data) => {
-      console.log('Process status update:', data);
-      if (!data || data.processId !== processId) return;
+      console.log('Process status update received:', data);
+      if (!data || data.processId !== processId) {
+        console.log('Ignoring status update - process ID mismatch:', { 
+          received: data?.processId, 
+          current: processId,
+          data
+        });
+        return;
+      }
 
-      setServiceDetails(prev => ({
-        ...prev,
+      console.log('Current service details:', serviceDetails);
+      console.log('Updating service details with:', {
         status: data.status,
         pid: data.processId,
         memory: data.memory,
         cpu: data.cpu,
         ports: data.ports,
-        startTime: data.startTime || prev.startTime
-      }));
+        startTime: data.startTime
+      });
+
+      setServiceDetails(prev => {
+        const updated = {
+          ...prev,
+          status: data.status,
+          pid: data.processId,
+          memory: data.memory,
+          cpu: data.cpu,
+          ports: data.ports,
+          startTime: data.startTime || prev.startTime
+        };
+        console.log('Updated service details:', updated);
+        return updated;
+      });
 
       if (data.status === 'stopped' || data.status === 'error') {
+        console.log('Setting process as stopped/error');
         setIsRunning(false);
         setProcessId(null);
       } else if (data.status === 'running' || data.status === 'starting') {
+        console.log('Setting process as running');
         setIsRunning(true);
       }
     };
 
+    console.log('Setting up process status listener');
     const cleanup = window.electron.on('process-status', handleProcessStatus);
-    return () => cleanup();
+    return () => {
+      console.log('Cleaning up process status listener');
+      cleanup();
+    };
   }, [processId]);
 
   // Handle service output
@@ -125,9 +152,10 @@ function ServiceControl({ project, onStart, onStop }) {
     };
 
     console.log('Setting up port conflict listener');
-    const unsubscribe = window.electron.on('port-conflict', handlePortConflict);
+    const unsubscribe = window.electron.on('port-conflicts', handlePortConflict);
+
     return () => {
-      console.log('Removing port conflict listener');
+      console.log('Removing port conflict listeners');
       unsubscribe();
     };
   }, []);
@@ -244,36 +272,20 @@ function ServiceControl({ project, onStart, onStop }) {
 
   const handleStart = async () => {
     try {
-      console.log('Starting service...');
-      setOutput('');
-      setServiceDetails(prev => ({
-        ...prev,
-        status: 'starting'
-      }));
-
       const result = await window.electron.invoke('start-service', {
         command: project.start_command,
         workingDirectory: project.working_directory
       });
 
-      console.log('Start service result:', result);
+      if (result.error === 'PORT_CONFLICT') {
+        console.log('Port conflicts detected:', result.conflicts);
+        setPortConflicts(result.conflicts);
+        setPortConflictDialogOpen(true);
+        return;
+      }
 
       if (result.error) {
-        if (result.error === 'PORT_CONFLICT') {
-          console.log('Port conflicts detected:', result.conflicts);
-          setServiceDetails(prev => ({
-            ...prev,
-            status: 'error',
-            details: 'Port conflicts detected'
-          }));
-          return;
-        }
-        setOutput(`Error: ${result.error}\n`);
-        setServiceDetails(prev => ({
-          ...prev,
-          status: 'error',
-          details: result.error
-        }));
+        setOutput(prev => prev + `\nError starting service: ${result.error}\n`);
         return;
       }
 
@@ -286,166 +298,45 @@ function ServiceControl({ project, onStart, onStop }) {
         pid: result.processId,
         startTime: Date.now()
       }));
-
-      if (onStart) {
-        onStart(result.processId);
-      }
     } catch (error) {
       console.error('Error starting service:', error);
-      setOutput(`Error: ${error.message}\n`);
-      setServiceDetails(prev => ({
-        ...prev,
-        status: 'error',
-        details: error.message
-      }));
+      setOutput(prev => prev + `\nError starting service: ${error.message}\n`);
     }
   };
 
-  const handlePortConflictResolution = async () => {
-    setPortConflictDialogOpen(false);
-    
-    if (!portConflicts || portConflicts.length === 0) {
-      return;
-    }
-
+  const handleResolveConflicts = async () => {
     try {
-      setOutput(prev => prev + '\nKilling conflicting processes...\n');
+      setOutput(prev => prev + '\nAttempting to kill conflicting processes...\n');
+      console.log('Resolving port conflicts:', portConflicts);
       
-      // Kill each conflicting process
-      for (const conflict of portConflicts) {
-        try {
-          await window.electron.invoke('kill-port-processes', { 
-            pid: conflict.pid,
-            port: conflict.port 
-          });
-          setOutput(prev => prev + `Successfully killed process: ${conflict.name} (PID: ${conflict.pid})\n`);
-        } catch (error) {
-          setOutput(prev => prev + `Failed to kill process: ${conflict.name} (PID: ${conflict.pid}) - ${error.message}\n`);
-        }
-      }
-
-      // Clear conflicts
-      setPortConflicts([]);
-      
-      // Try starting the service again
-      await handleStart();
-    } catch (error) {
-      console.error('Error resolving port conflicts:', error);
-      setOutput(prev => prev + `Error resolving port conflicts: ${error.message}\n`);
-    }
-  };
-
-  const handleResolveConflicts = async (conflicts) => {
-    console.log('Resolving conflicts:', conflicts);
-    if (!Array.isArray(conflicts) || conflicts.length === 0) {
-      console.log('No conflicts to resolve');
-      setPortConflictDialogOpen(false);
-      return;
-    }
-
-    try {
-      setOutput(prev => prev + '\nKilling conflicting processes...\n');
-      
-      // Track which PIDs we've already killed
-      const killedPids = new Set();
-      
-      // Kill each conflicting process
-      for (const conflict of conflicts) {
-        console.log('Processing conflict:', conflict);
-        
-        // Skip if we've already killed this PID
-        if (killedPids.has(conflict.pid)) {
-          console.log(`Already killed PID ${conflict.pid}, skipping`);
-          continue;
-        }
-
-        try {
-          const result = await window.electron.invoke('kill-port-processes', { 
-            pid: conflict.pid,
-            port: conflict.port 
-          });
-          console.log('Kill result:', result);
-          
-          if (result.success) {
-            setOutput(prev => prev + `Successfully killed process: ${conflict.name} (PID: ${conflict.pid})\n`);
-            killedPids.add(conflict.pid);
-          } else {
-            setOutput(prev => prev + `Failed to kill process: ${conflict.name} (PID: ${conflict.pid}) - ${result.error}\n`);
-            return;
-          }
-        } catch (error) {
-          console.error('Error killing process:', error);
-          setOutput(prev => prev + `Failed to kill process: ${conflict.name} (PID: ${conflict.pid}) - ${error.message}\n`);
-          return;
-        }
-      }
-
-      // Clear conflicts and close dialog
-      console.log('All processes killed, clearing conflicts');
-      setPortConflicts([]);
-      setPortConflictDialogOpen(false);
-      
-      // Wait a moment for ports to be fully released
-      console.log('Waiting before restart...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Start the service
-      console.log('Starting service after resolving conflicts');
-      const result = await window.electron.invoke('start-service', {
-        command: project.start_command,
-        workingDirectory: project.working_directory
+      const result = await window.electron.invoke('kill-port-processes', {
+        conflicts: portConflicts
       });
 
-      console.log('Start service result after conflicts:', result);
-      if (result.error) {
-        setOutput(prev => prev + `\nError starting service: ${result.error}\n`);
-        setServiceDetails(prev => ({
-          ...prev,
-          status: 'error',
-          details: result.error
-        }));
+      if (result.success) {
+        setOutput(prev => prev + 'Successfully killed conflicting processes\n');
+        setPortConflictDialogOpen(false);
+        setPortConflicts([]);
+        // Wait a moment before trying to start again
+        setTimeout(() => {
+          handleStart();
+        }, 1000);
       } else {
-        console.log('Service started with PID:', result.processId);
-        setProcessId(result.processId);
-        setIsRunning(true);
-        setServiceDetails(prev => ({
-          ...prev,
-          status: 'starting',
-          pid: result.processId,
-          startTime: Date.now()
-        }));
-        if (onStart) {
-          onStart(result.processId);
-        }
+        setOutput(prev => prev + `Failed to kill all processes: ${result.error}\n`);
+        // Keep dialog open if there was an error
+        setPortConflicts([]);
+        setPortConflictDialogOpen(false);
       }
     } catch (error) {
-      console.error('Error resolving port conflicts:', error);
-      setOutput(prev => prev + `\nError resolving port conflicts: ${error.message}\n`);
+      console.error('Error resolving conflicts:', error);
+      setOutput(prev => prev + `Error resolving conflicts: ${error.message}\n`);
+      setPortConflicts([]);
+      setPortConflictDialogOpen(false);
     }
   };
 
-  const handleChangePort = async (newPort) => {
-    try {
-      // Update all conflicting ports in the project's configuration
-      const updatedProject = {
-        ...project,
-        ports: project.ports || {},
-      };
-
-      // Map each conflicting port to the new port range
-      portConflicts.forEach((conflict, index) => {
-        updatedProject.ports[conflict.port] = parseInt(newPort) + index;
-      });
-
-      await window.electron.invoke('update-project', updatedProject);
-      setPortConflicts([]);
-      setPortConflictDialogOpen(false);
-      // Retry starting the service with the new ports
-      handleStart();
-    } catch (error) {
-      console.error('Failed to change ports:', error);
-      setOutput(prev => prev + '\nFailed to change ports: ' + error.message + '\n');
-    }
+  const handleClosePortConflictDialog = () => {
+    setPortConflictDialogOpen(false);
   };
 
   const handleStop = async () => {
@@ -489,52 +380,35 @@ function ServiceControl({ project, onStart, onStop }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Project Details */}
       <ProjectDetails project={project} serviceDetails={serviceDetails} />
+      
+      <Terminal output={output} />
 
-      {/* Controls */}
-      <div className="p-4 border-t border-gray-200 bg-gray-50">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-2">
+      <div className="flex justify-between items-center p-4 bg-gray-100">
+        <div className="space-x-2">
+          {!isRunning ? (
             <button
               onClick={handleStart}
-              disabled={isRunning}
-              className={`px-4 py-2 rounded-md ${
-                isRunning
-                  ? 'bg-gray-300 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
+              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
             >
-              Start
+              Start Service
             </button>
+          ) : (
             <button
               onClick={handleStop}
-              disabled={!isRunning}
-              className={`px-4 py-2 rounded-md ${
-                !isRunning
-                  ? 'bg-gray-300 cursor-not-allowed'
-                  : 'bg-red-600 hover:bg-red-700 text-white'
-              }`}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
             >
-              Stop
+              Stop Service
             </button>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Terminal Output */}
-      <div className="flex-1 overflow-hidden">
-        <Terminal output={output} />
-      </div>
-
-      {/* Port Conflict Dialog */}
       <PortConflictDialog
         isOpen={portConflictDialogOpen}
-        onClose={() => setPortConflictDialogOpen(false)}
+        onClose={handleClosePortConflictDialog}
         conflicts={portConflicts}
         onResolveConflicts={handleResolveConflicts}
-        onChangePort={handleChangePort}
-        onPortConflictResolution={handlePortConflictResolution}
       />
     </div>
   );

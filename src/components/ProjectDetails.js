@@ -107,17 +107,17 @@ function ProjectDetails({ project, serviceDetails }) {
           <div className="space-y-2">
             <div>
               <span className="text-gray-600">Memory:</span>{' '}
-              <span>{formatMemory(serviceDetails.resourceUsage?.memory)}</span>
+              <span>{formatMemory(serviceDetails.memory)}</span>
             </div>
             <div>
               <span className="text-gray-600">CPU:</span>{' '}
-              <span>{formatCPU(serviceDetails.resourceUsage?.cpu)}</span>
+              <span>{formatCPU(serviceDetails.cpu)}</span>
             </div>
             <div>
               <span className="text-gray-600">Active Ports:</span>{' '}
               <span className="font-mono text-sm">
-                {serviceDetails.activePorts?.length > 0
-                  ? serviceDetails.activePorts.join(', ')
+                {serviceDetails.ports?.length > 0
+                  ? serviceDetails.ports.join(', ')
                   : 'None'}
               </span>
             </div>
