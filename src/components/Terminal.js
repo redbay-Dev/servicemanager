@@ -29,18 +29,16 @@ function Terminal({ output }) {
   };
 
   return (
-    <div className="relative h-64 bg-gray-900 rounded-lg shadow-inner">
-      <div
-        ref={terminalRef}
-        className="absolute inset-0 p-4 font-mono text-sm text-gray-100 overflow-auto whitespace-pre-wrap"
-        style={{ 
-          fontFamily: "'Courier New', Courier, monospace",
-          backgroundColor: '#1a1a1a',
-          lineHeight: '1.4'
-        }}
-      >
-        {formatOutput(output)}
-      </div>
+    <div
+      ref={terminalRef}
+      className="h-64 p-6 font-mono text-sm text-gray-200 overflow-auto whitespace-pre-wrap bg-gray-900"
+      style={{ 
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+        lineHeight: '1.5',
+        scrollBehavior: 'smooth'
+      }}
+    >
+      {formatOutput(output)}
     </div>
   );
 }

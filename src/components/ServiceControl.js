@@ -399,29 +399,100 @@ function ServiceControl({ project, onStart, onStop }) {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <ProjectDetails project={project} serviceDetails={serviceDetails} />
-      
-      <Terminal output={output} />
+    <div className="flex flex-col h-full bg-gray-100 p-6 space-y-6">
+      <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">{project.name}</h2>
+        <div className="grid grid-cols-4 gap-6">
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h3 className="text-sm font-medium text-gray-500 mb-2">Status</h3>
+            <div className="flex items-center space-x-3">
+              <div className={`w-3 h-3 rounded-full ${
+                serviceDetails.status === 'running' ? 'bg-green-500 animate-pulse' :
+                serviceDetails.status === 'starting' ? 'bg-yellow-500 animate-pulse' :
+                'bg-red-500'
+              }`} />
+              <span className="text-base font-medium text-gray-700 capitalize">
+                {serviceDetails.status}
+              </span>
+            </div>
+          </div>
 
-      <div className="flex justify-between items-center p-4 bg-gray-100">
-        <div className="space-x-2">
-          {!isRunning ? (
-            <button
-              onClick={handleStart}
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              Start Service
-            </button>
-          ) : (
-            <button
-              onClick={handleStop}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Stop Service
-            </button>
-          )}
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h3 className="text-sm font-medium text-gray-500 mb-2">Process</h3>
+            <div className="space-y-1">
+              <div className="text-base font-medium text-gray-700">
+                PID: {serviceDetails.pid || 'N/A'}
+              </div>
+              {serviceDetails.startTime && (
+                <div className="text-sm text-gray-600">
+                  Started: {new Date(serviceDetails.startTime).toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h3 className="text-sm font-medium text-gray-500 mb-2">Resources</h3>
+            <div className="space-y-1">
+              <div className="text-base font-medium text-gray-700">
+                Memory: {(serviceDetails.memory || 0).toFixed(1)} MB
+              </div>
+              <div className="text-base font-medium text-gray-700">
+                CPU: {(serviceDetails.cpu || 0).toFixed(1)}%
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h3 className="text-sm font-medium text-gray-500 mb-2">Actions</h3>
+            <div>
+              {!isRunning ? (
+                <button
+                  onClick={handleStart}
+                  className="w-full px-4 py-2 bg-green-600 text-white font-medium rounded-lg
+                           shadow-md hover:shadow-lg hover:bg-green-700
+                           transition-all duration-200"
+                >
+                  Start Service
+                </button>
+              ) : (
+                <button
+                  onClick={handleStop}
+                  className="w-full px-4 py-2 bg-red-600 text-white font-medium rounded-lg
+                           shadow-md hover:shadow-lg hover:bg-red-700
+                           transition-all duration-200"
+                >
+                  Stop Service
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {serviceDetails.ports && serviceDetails.ports.length > 0 && (
+          <div className="mt-6 bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h3 className="text-sm font-medium text-gray-500 mb-3">Active Ports</h3>
+            <div className="flex flex-wrap gap-3">
+              {serviceDetails.ports.map((port, i) => (
+                <div key={i} className="px-3 py-1 bg-white rounded border border-gray-200 text-sm font-medium text-gray-700">
+                  {port}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-grow bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+        <div className="bg-gray-800 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-3 h-3 rounded-full bg-red-500"></div>
+            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+          </div>
+          <span className="text-sm font-medium text-gray-400">Terminal Output</span>
+        </div>
+        <Terminal output={output} />
       </div>
 
       <PortConflictDialog
