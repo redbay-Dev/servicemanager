@@ -97,165 +97,202 @@ function ProjectForm({ onSave, onCancel, initialData = {} }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Name</label>
-        <input
-          type="text"
-          name="name"
-          value={project.name}
-          onChange={handleChange}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          required
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Description</label>
-        <input
-          type="text"
-          name="description"
-          value={project.description}
-          onChange={handleChange}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Working Directory</label>
-        <div className="mt-1 flex rounded-md shadow-sm">
-          <input
-            type="text"
-            name="working_directory"
-            value={project.working_directory}
-            onChange={handleChange}
-            className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          />
+    <div className="bg-gray-800 rounded-xl shadow-lg p-8">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="border-b border-gray-700 pb-6">
+          <h2 className="text-2xl font-semibold text-gray-100 mb-1">
+            {project.id ? 'Edit Project' : 'New Project'}
+          </h2>
+          <p className="text-sm text-gray-400">Configure your service settings and environment</p>
         </div>
-      </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Start Command</label>
-        <input
-          type="text"
-          name="start_command"
-          value={project.start_command}
-          onChange={handleChange}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          required
-        />
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">Project Name</label>
+              <input
+                type="text"
+                name="name"
+                value={project.name}
+                onChange={handleChange}
+                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+                placeholder="My Service"
+                required
+              />
+            </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Stop Command</label>
-        <input
-          type="text"
-          name="stop_command"
-          value={project.stop_command}
-          onChange={handleChange}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-        />
-      </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">Description</label>
+              <textarea
+                name="description"
+                value={project.description}
+                onChange={handleChange}
+                rows="2"
+                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+                placeholder="Brief description of your service"
+              />
+            </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Ports</label>
-        <div className="mt-1 flex rounded-md shadow-sm">
-          <input
-            type="number"
-            name="portInput"
-            value={project.portInput}
-            onChange={handleChange}
-            placeholder="Enter port number"
-            className="flex-1 rounded-l-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          />
-          <button
-            type="button"
-            onClick={handleAddPort}
-            className="inline-flex items-center px-3 rounded-r-md border border-l-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-sm"
-          >
-            Add
-          </button>
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">Working Directory</label>
+              <div className="flex rounded-lg shadow-sm">
+                <input
+                  type="text"
+                  name="working_directory"
+                  value={project.working_directory}
+                  onChange={handleChange}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                           focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+                  placeholder="/path/to/project"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">Start Command</label>
+              <input
+                type="text"
+                name="start_command"
+                value={project.start_command}
+                onChange={handleChange}
+                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+                placeholder="npm start"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">Stop Command</label>
+              <input
+                type="text"
+                name="stop_command"
+                value={project.stop_command}
+                onChange={handleChange}
+                className="w-full px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+                placeholder="npm stop"
+              />
+            </div>
+          </div>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {project.ports.map(port => (
-            <span
-              key={port}
-              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-            >
-              {port}
+
+        <div className="border-t border-gray-700 pt-6 space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-3">Service Ports</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                name="portInput"
+                value={project.portInput}
+                onChange={handleChange}
+                placeholder="Port number (e.g. 3000)"
+                className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+              />
               <button
                 type="button"
-                onClick={() => handleRemovePort(port)}
-                className="ml-1 text-blue-400 hover:text-blue-600"
+                onClick={handleAddPort}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
+                         transition-colors duration-200 font-medium"
               >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Environment Variables</label>
-        <div className="mt-1 grid grid-cols-[1fr,1fr,auto] gap-2">
-          <input
-            type="text"
-            name="envKeyInput"
-            value={project.envKeyInput}
-            onChange={handleChange}
-            placeholder="Key"
-            className="rounded-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          />
-          <input
-            type="text"
-            name="envValueInput"
-            value={project.envValueInput}
-            onChange={handleChange}
-            placeholder="Value"
-            className="rounded-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          />
-          <button
-            type="button"
-            onClick={handleAddEnvVar}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-          >
-            Add
-          </button>
-        </div>
-        <div className="mt-2">
-          {Object.entries(project.environment).map(([key, value]) => (
-            <div key={key} className="flex items-center justify-between py-1">
-              <span className="text-sm">
-                <span className="font-medium">{key}</span> = {value}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleRemoveEnvVar(key)}
-                className="text-red-600 hover:text-red-900"
-              >
-                Remove
+                Add Port
               </button>
             </div>
-          ))}
-        </div>
-      </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {project.ports.map(port => (
+                <span
+                  key={port}
+                  className="inline-flex items-center px-3 py-1 rounded-full text-sm 
+                           font-medium bg-blue-900 text-blue-200 border border-blue-800"
+                >
+                  Port {port}
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePort(port)}
+                    className="ml-2 text-blue-300 hover:text-blue-100"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
 
-      <div className="flex justify-end space-x-3">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-        >
-          Save
-        </button>
-      </div>
-    </form>
+          <div>
+            <label className="block text-sm font-medium text-gray-200 mb-3">Environment Variables</label>
+            <div className="grid grid-cols-[1fr,1fr,auto] gap-3">
+              <input
+                type="text"
+                name="envKeyInput"
+                value={project.envKeyInput}
+                onChange={handleChange}
+                placeholder="KEY"
+                className="px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+              />
+              <input
+                type="text"
+                name="envValueInput"
+                value={project.envValueInput}
+                onChange={handleChange}
+                placeholder="value"
+                className="px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200"
+              />
+              <button
+                type="button"
+                onClick={handleAddEnvVar}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
+                         transition-colors duration-200 font-medium"
+              >
+                Add
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {Object.entries(project.environment).map(([key, value]) => (
+                <div key={key} className="flex items-center justify-between p-3 bg-gray-700 rounded-lg border border-gray-600">
+                  <div className="flex items-center space-x-3">
+                    <span className="font-mono text-sm text-gray-300">{key}</span>
+                    <span className="text-gray-500">=</span>
+                    <span className="font-mono text-sm text-gray-200">{value}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveEnvVar(key)}
+                    className="text-gray-400 hover:text-red-400 transition-colors duration-200"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end space-x-4 pt-6 border-t border-gray-700">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-6 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700
+                     transition-colors duration-200 font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700
+                     transition-colors duration-200 font-medium"
+          >
+            {project.id ? 'Update Project' : 'Create Project'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
