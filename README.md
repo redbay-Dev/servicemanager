@@ -1,5 +1,7 @@
 # Service Manager
 
+ Redbay Digital. This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
+
 A modern desktop application for managing multiple development services and projects. Built with Electron and React, it provides an intuitive interface for starting, stopping, and monitoring local development services.
 
 ## Features
@@ -74,10 +76,6 @@ servicemanager/
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
